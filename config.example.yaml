@@ -1,0 +1,31 @@
+# logpipe example configuration
+
+# inputs: list of log files to tail
+inputs:
+  - path: /var/log/app/app.log
+    tags:
+      service: app
+      env: production
+  - path: /var/log/nginx/access.log
+    tags:
+      service: nginx
+      env: production
+
+# sinks: destinations to ship log lines to
+sinks:
+  - name: local-stdout
+    type: stdout
+
+  - name: remote-http
+    type: http
+    options:
+      url: https://logs.example.com/ingest
+      timeout: 5s
+      auth_header: "Bearer changeme"
+
+# buffer: controls internal channel capacity and worker concurrency
+buffer:
+  # capacity: number of log lines to buffer in memory before applying backpressure
+  capacity: 8192
+  # workers: number of concurrent goroutines fanning out to sinks
+  workers: 4
