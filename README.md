@@ -50,6 +50,16 @@ Logpipe will tail all matching files, parse entries, and fan-out to each configu
 
 ---
 
+## Supported Sinks
+
+| Sink | Description |
+|------|-------------|
+| `elasticsearch` | Ships log entries to an Elasticsearch index |
+| `stdout` | Prints log entries to standard output (useful for debugging) |
+| `file` | Writes log entries to a local file |
+
+---
+
 ## Contributing
 
 Pull requests are welcome. Please open an issue first to discuss significant changes.
