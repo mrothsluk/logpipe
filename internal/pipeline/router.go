@@ -1,54 +1,60 @@
 package pipeline
 
 import (
+	"context"
 	"fmt"
 	"log"
 
 	"github.com/yourorg/logpipe/internal/sink"
 )
 
-// Router fans out a single log line to multiple sinks.
-// If a sink returns an error the line is still delivered to the remaining
-// sinks; all errors are collected and returned.
+// Router fans a stream of log lines out to multiple sinks.
+// Each sink gets its own BoundedQueue so a slow sink cannot stall others.
 type Router struct {
-	sinks []sink.Sink
+	sinks  []sink.Sink
+	queues []*BoundedQueue
 }
 
-// NewRouter creates a Router that writes to all provided sinks.
-func NewRouter(sinks []sink.Sink) *Router {
-	return &Router{sinks: sinks}
+// NewRouter creates a Router that writes to the provided sinks.
+// bpCfg controls backpressure per-sink queue.
+func NewRouter(sinks []sink.Sink, bpCfg BackpressureConfig) *Router {
+	r := &Router{sinks: sinks}
+	for _, s := range sinks {
+		s := s // capture
+		q := NewBoundedQueue(bpCfg, func(line string) {
+			if err := s.Write(line); err != nil {
+				log.Printf("[router] sink %s write error: %v", s.Name(), err)
+			}
+		})
+		r.queues = append(r.queues, q)
+	}
+	return r
 }
 
-// Route sends line to every registered sink.
-// Returns a combined error when one or more sinks fail.
-func (r *Router) Route(line string) error {
-	var errs []error
-	for _, s := range r.sinks {
-		if err := s.Write(line); err != nil {
-			log.Printf("[router] sink %q error: %v", s.Name(), err)
-			errs = append(errs, fmt.Errorf("sink %q: %w", s.Name(), err))
+// Route sends line to every sink queue.
+// Lines are dropped per-sink if its queue is full (backpressure).
+func (r *Router) Route(ctx context.Context, line string) error {
+	var errs []string
+	for i, q := range r.queues {
+		if !q.Enqueue(ctx, line) {
+			errs = append(errs, fmt.Sprintf("sink %s: queue full or ctx done", r.sinks[i].Name()))
 		}
 	}
-	if len(errs) == 0 {
-		return nil
+	if len(errs) > 0 {
+		return fmt.Errorf("router dropped lines: %v", errs)
 	}
-	return fmt.Errorf("route errors: %v", errs)
+	return nil
 }
 
-// Close shuts down all sinks in registration order.
-// All errors are logged; the first non-nil error is returned.
+// Close drains all sink queues and closes every sink.
 func (r *Router) Close() error {
-	var first error
+	for _, q := range r.queues {
+		q.Close()
+	}
 	for _, s := range r.sinks {
 		if err := s.Close(); err != nil {
-			log.Printf("[router] close sink %q: %v", s.Name(), err)
-			if first == nil {
-				first = err
-			}
+			log.Printf("[router] sink %s close error: %v", s.Name(), err)
 		}
 	}
-	return first
+	return nil
 }
-
-// Sinks returns the list of registered sinks (read-only view).
-func (r *Router) Sinks() []sink.Sink { return r.sinks }
