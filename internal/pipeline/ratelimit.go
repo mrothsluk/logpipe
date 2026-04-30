@@ -26,6 +26,7 @@ type RateLimiter struct {
 	tokens int
 	lastRefill time.Time
 	clock  func() time.Time
+	dropped int64
 }
 
 // NewRateLimiter creates a new RateLimiter with the given config.
@@ -59,10 +60,18 @@ func (r *RateLimiter) Allow() bool {
 	}
 
 	if r.tokens <= 0 {
+		r.dropped++
 		return false
 	}
 	r.tokens--
 	return true
+}
+
+// DroppedCount returns the total number of log lines dropped due to rate limiting.
+func (r *RateLimiter) DroppedCount() int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.dropped
 }
 
 // Filter wraps a channel, forwarding only lines that pass the rate limit.
