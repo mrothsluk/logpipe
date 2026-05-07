@@ -85,3 +85,29 @@ func TestFanout_NoSinks(t *testing.T) {
 	fo.Send(ctx, "line") // should not panic
 	fo.Close()
 }
+
+func TestFanout_LineOrderPreserved(t *testing.T) {
+	a := &recordSink{name: "a"}
+	cfg := DefaultBackpressureConfig()
+	fo := NewFanout([]Sink{a}, cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fo.Start(ctx)
+
+	want := []string{"first", "second", "third"}
+	for _, line := range want {
+		fo.Send(ctx, line)
+	}
+	fo.Close()
+
+	got := a.Lines()
+	if len(got) != len(want) {
+		t.Fatalf("expected %d lines, got %d", len(want), len(got))
+	}
+	for i, line := range want {
+		if got[i] != line {
+			t.Errorf("line[%d]: expected %q, got %q", i, line, got[i])
+		}
+	}
+}
