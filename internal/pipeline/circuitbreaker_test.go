@@ -90,6 +90,25 @@ func TestCircuitBreaker_HalfOpenAfterDuration(t *testing.T) {
 	}
 }
 
+// TestCircuitBreaker_HalfOpenFailureReopens verifies that a failure during the
+// half-open state transitions the circuit back to open rather than closed.
+func TestCircuitBreaker_HalfOpenFailureReopens(t *testing.T) {
+	s := &failingSink{name: "s"}
+	// First write fails (opens breaker), second write also fails (half-open failure).
+	s.failUntil.Store(2)
+	cfg := pipeline.CircuitBreakerConfig{FailureThreshold: 1, SuccessThreshold: 1, OpenDuration: 10 * time.Millisecond}
+	cb := pipeline.NewCircuitBreakerSink(s, cfg)
+	ctx := context.Background()
+
+	_ = cb.Write(ctx, "line") // trips the breaker → open
+	time.Sleep(20 * time.Millisecond)
+	// Half-open probe fails → should reopen
+	_ = cb.Write(ctx, "line")
+	if cb.State() != pipeline.StateOpen {
+		t.Fatalf("expected circuit to reopen after half-open failure, got %v", cb.State())
+	}
+}
+
 func TestCircuitBreaker_DefaultConfig(t *testing.T) {
 	cfg := pipeline.DefaultCircuitBreakerConfig()
 	if cfg.FailureThreshold <= 0 {
