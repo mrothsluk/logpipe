@@ -53,3 +53,50 @@ func TestBatcher_WithBoundedQueue(t *testing.T) {
 		t.Fatalf("expected %d lines written, got %d", total, len(got))
 	}
 }
+
+// TestBatcher_WithBoundedQueue_PartialBatch verifies that the Batcher correctly
+// flushes a final partial batch when the number of lines is not a multiple of
+// MaxSize, ensuring no lines are dropped at the tail.
+func TestBatcher_WithBoundedQueue_PartialBatch(t *testing.T) {
+	const total = 13 // not a multiple of MaxSize (5)
+
+	s := &collectSink{}
+	cfg := BatchConfig{MaxSize: 5, MaxDelay: 50 * time.Millisecond}
+	b, err := NewBatcher(cfg, s)
+	if err != nil {
+		t.Fatalf("NewBatcher: %v", err)
+	}
+
+	qCfg := DefaultBackpressureConfig()
+	qCfg.Capacity = 64
+	q := NewBoundedQueue(qCfg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	for i := 0; i < total; i++ {
+		if err := q.Enqueue(ctx, "line"); err != nil {
+			t.Fatalf("Enqueue %d: %v", i, err)
+		}
+	}
+	q.Close()
+
+	ch := make(chan string, total)
+	go func() {
+		defer close(ch)
+		for {
+			line, ok := q.Dequeue(ctx)
+			if !ok {
+				return
+			}
+			ch <- line
+		}
+	}()
+
+	b.Run(ctx, ch)
+
+	got := s.snapshot()
+	if len(got) != total {
+		t.Fatalf("expected %d lines written, got %d", total, len(got))
+	}
+}
